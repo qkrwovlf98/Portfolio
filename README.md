@@ -1,34 +1,63 @@
 # ImTrainer
 
-**Unity · C# | 2D Top-down Survival | 5인 팀 프로젝트**
+**Unity · C# | 2D 탑다운 서바이벌 | 5인 팀 프로젝트**
 
 ![나는 트레이너다 타이틀 로고](./images/title.png)
 
-> 프로젝트에서 사용한 '나는 트레이너다' 타이틀 로고. 실제 게임 플레이 화면은 기능별 설명과 함께 별도로 추가할 예정입니다.
+> **[TODO-1] 플레이 GIF 또는 스크린샷 (제목 바로 아래 권장)**
+> 예: 웨이브 전투 중 화면 GIF 1개 + 증강 선택 화면 캡처 1장. 15초 이내 GIF면 충분합니다.
+> 이미지 대신 영상 링크(YouTube 등)를 걸어도 좋아요.
 
-ImTrainer는 적의 웨이브를 상대하며 증강을 선택해 캐릭터를 성장시키는 2D 탑다운 생존 게임입니다.
+웨이브로 몰려오는 적을 잡고, 레벨업할 때마다 증강을 골라 캐릭터를 키우는 2D 탑다운 서바이벌 게임입니다.
 
-**제가 집중한 작업:** 증강 데이터·후보 선정·효과 적용, 적 관리 및 스폰 관련 로직, 전투 객체 재사용과 동작 검증. 게임 전체의 프레임워크와 모든 UI를 단독 개발한 것은 아닙니다.
+
+프로젝트 기간 : 2026년 9월 27일 ~ 2026년 10월 21일  
+팀 구성 : 클라이언트 개발 3인 / 서버 개발 2인  
+담당 포지션 : 클라이언트 개발  
+클라이언트는 개발은 개발 기간중 주기적으로 회의를 하여 구현할 피쳐들을 정해놓고, 각자 원하는 구현 사항들을 선택하여 구현하는 방식으로 개발되었습니다.
+협업은 git을 이용하여 프로젝트를 진행하였고, 정기적으로 매주 월요일, 그리고 필요에 따라 비정기 회의를 소집하여 개발 진행 사항과 조율해야할 사항에 대한 피드백을 진행하였습니다.
+
+
+## 담당 구현
+
+- 증강 시스템 (데이터 로딩, 후보 추첨, 효과 적용)
+- 적 스폰 및 관리(레벨 디자인)
+- 전투 오브젝트 풀
+
+게임 전체 프레임워크와 UI 및 그래픽asset의 상당수는 AI를 통해 구현되었습니다.
+
+> **[수정 필요 — AI 활용 범위 및 담당 구현 구분]**
+> 팀 전체의 AI 활용 범위와 본인이 직접 구현하거나 검증한 범위를 구분해 적어주세요.
+> [여기에 직접 작성]
 
 ---
 
 ## 1. 증강 시스템
 
-레벨업 시 데이터에 정의된 증강 후보를 추첨하고, 선택 결과를 현재 플레이어 상태에 적용합니다. 플레이어에게 보이는 카드는 `AugmentWindowBehavior`가 담당하고, 증강 데이터·선택 결과·효과는 `UpgradeManager`가 관리합니다.
+레벨업하면 기본적으로 증강 후보 3개를 뽑아 보여주고, 플레이어가 고른 증강의 효과를 능력치에 반영합니다. 증강 데이터, 선택 결과, 효과는 `UpgradeManager`가 맡습니다.
 
-**동작 흐름**
+`JSON 로딩 → runtimedata로 json data parsing → 후보 3개 추첨 (weight값 및 특정 조건 기반) → UI 표시 → 선택 → Level 갱신 및 Effect 적용`
 
-`JSON 로딩 → 증강 정의 생성 → 레벨·해금 조건에 따른 Weight 계산 → 3개 후보 추첨 → UI 표시 → 선택 → Level 갱신 및 Effect 적용`
+최초 기획에서 결정된 사항으로는, 증강에 대한 데이터를 서버에 저장하여, 진행한 Run의 유효성을 검사하는것으로 기획이 되었으나.
+서버 개발 상황이 여의치 않아 Json을 이용하여 증강데이터를 관리하는 구조만 남게 되었습니다.
+구조를 바꾸는 부분에 대한 회의도 진행되었으나, 구현된 시스템으로 증강 데이터를 추가 및 제거하는것이 간편하여 구조를 유지하는 것으로 결정되었습니다.
 
-### 증강 후보 선정
+구현된 증강들은 모두 playerManager가 관리하는 스크립트와 관련이 되어있습니다.
+다른 시스템에서 player에 영향을 미치기 위해 필요한 효과를 playerManager를 통해 적용할 수 있도록 API를 만들어 각각의 시스템에 연결했습니다.
+UpgradeManager는 해당 API를 이용하여 구현되었기 때문에 효과를 적용할 때 세부 구현을 알 필요가 없게됩니다.
 
-각 후보의 현재 `Weight`를 기준으로 추첨하며, 한 번 선택된 후보는 같은 선택 화면에서 다시 뽑히지 않도록 후보 목록에서 제거합니다. 최대 Level에 도달하거나 조건을 만족하지 못한 증강은 `GetWeight()`가 0을 반환하여 제외됩니다.
+### 후보 뽑기
+
+후보마다 현재 `Weight`를 가지고 가중치 추첨을 합니다. 실제 선택지 개수는 `RollChoices()`에 전달되는 `count`를 따릅니다. 한 번 뽑힌 증강은 같은 선택 화면에서 다시 나오지 않도록 후보 목록에서 빼고, 최대 Level에 도달했거나 조건이 안 맞는 증강은 `GetWeight()`가 0을 반환해서 처음부터 후보에 들어가지 않습니다.
+
+후보를 추첨하는 시스템은 기획단계에서 단계별 증강 업그레이드나, 증강 트리같은 컨텐츠들이 언급이 되어 조건검사를 통해 가중치에 변화를 주는 구현을 하였습니다.
+실제로, 최종 결과물에도 테이블에 존재하는 기본 증강들을 모두 최종레벨까지 달성하였을때에 해금되는 한계 돌파 증강, 그리고 게임중에 단 하나만 찍을 수 있는 에픽 증강 시스템을 도입하여 테이블을 유동적으로 관리하였습니다.
 
 <details>
-<summary><b>코드 보기 — 후보 3개 추첨 (UpgradeManager.RefreshChoices)</b></summary>
+<summary><b>코드 보기 — 후보 가중치 추첨 (UpgradeManager.RollChoices / PickWeighted)</b></summary>
 
 ```csharp
-private void RefreshChoices()
+private void RollChoices(int count)
 {
     _choices.Clear();
     _candidates.Clear();
@@ -40,35 +69,55 @@ private void RefreshChoices()
         }
     }
 
-    while (_choices.Count < CHOICE_COUNT && _candidates.Count > 0)
+    while (_choices.Count < count && _candidates.Count > 0)
     {
-        double totalWeight = 0;
-        foreach (var candidate in _candidates) totalWeight += GetWeight(candidate.Id);
-        var roll = UnityEngine.Random.value * totalWeight;
-        var selectedIndex = _candidates.Count - 1;
-        for (var i = 0; i < _candidates.Count; i++)
-        {
-            roll -= GetWeight(_candidates[i].Id);
-            if (roll < 0)
-            {
-                selectedIndex = i;
-                break;
-            }
-        }
-
-        // Random.value는 1도 반환할 수 있다. 그 경계에서는 마지막 유효 후보를 사용한다.
-        _choices.Add(_candidates[selectedIndex]);
-        _candidates.RemoveAt(selectedIndex);
+        var picked = PickWeighted(_candidates);
+        _choices.Add(picked);
+        _candidates.Remove(picked);
     }
+}
+
+// 가중치 비례로 하나를 고른다. Random.value가 1일 때는 마지막 후보다.
+private UpgradeDefinition PickWeighted(List<UpgradeDefinition> candidates)
+{
+    if (candidates.Count == 0)
+    {
+        return null;
+    }
+
+    double totalWeight = 0;
+    foreach (var candidate in candidates) totalWeight += GetWeight(candidate.Id);
+    var roll = UnityEngine.Random.value * totalWeight;
+    for (var i = 0; i < candidates.Count; i++)
+    {
+        roll -= GetWeight(candidates[i].Id);
+        if (roll < 0)
+        {
+            return candidates[i];
+        }
+    }
+
+    return candidates[candidates.Count - 1];
 }
 ```
 
-*발췌: `Assets/Runtime/Scripts/Managers/UpgradeManager.cs` — 연결된 저장소 `main` 기준.*
+`Assets/Runtime/Scripts/Managers/UpgradeManager.cs`
 </details>
 
-### 증강 선택과 효과 적용
+### 효과 적용
 
-선택 인덱스와 현재 선택 가능 상태를 검증하고 증강 Level을 올립니다. 각 Effect의 대상과 Type에 따라 `PlayerManager`의 능력치 배율 및 특수 능력 값을 갱신합니다. UI 자체가 플레이어 능력치를 변경하지 않고 `UpgradeManager`의 선택 기능을 호출하도록 역할을 나눴습니다.
+카드를 누르면 `TrySelectChoice`가 선택 인덱스와 현재 선택 가능 상태를 확인하고, 증강 Level을 올린 뒤 Effect 종류에 따라 `PlayerManager`에 통해 적절한 API 호출 및 데이터를 전달합니다.
+
+Effect에 대한 데이터를 정의하는 데이터 클래스를 만들고 각 효과에 대한 데이터 처리 방법을 다르게 하기위해 Effect의 종류는 enum으로 만들어 관리하였습니다.
+증강데이터에서 파싱한 effect list의 효과 목록을 순회하며 각각의 효과에 대한 개별 수치를 받아 switch문으로 처리하였습니다.
+
+Effect외에도 특정 조건을 만족할경우 조건에 맞는 증강들을 막는 구현은 관리하는 시스템이 아닌 개별적으로 하드코딩하여 구현하게 되었습니다.
+예시로 에픽등급에 해당하는 Grade 2은 한 판에 하나만 가질 수 있는 상위 증강이라서, 하나를 고르면 나머지는 후보에서 빠지게 했습니다.
+
+각각의 조건들에 대한 처리를 만들다보니 새로운 매서드들이 생기고 코드가 거대해졌는데, 효과적인 관리 수단을 생각해내지 못하여 아쉬웠습니다.
+
+UI는 능력치를 직접 건드리지 않고 플레이어가 어떤 데이터를 선택했는지 확인하고, 해당 선택지에 등록된 effect를 내부 로직이 분석하여 적용하도록 구현하였습니다.
+
 
 <details>
 <summary><b>코드 보기 — 선택 검증 및 효과 적용 (UpgradeManager.TrySelectChoice)</b></summary>
@@ -155,145 +204,84 @@ public bool TrySelectChoice(int choiceIndex)
 }
 ```
 
-*발췌: `Assets/Runtime/Scripts/Managers/UpgradeManager.cs` — 연결된 저장소 `main` 기준.*
+`Assets/Runtime/Scripts/Managers/UpgradeManager.cs`
 </details>
 
-### 선택지 UI와의 연결
+### UI와 연결되는 지점
 
-UI는 매니저가 준비한 `CurrentChoices`를 읽어서 각 카드의 이름, 현재·다음 Level, 효과 설명을 채웁니다. 아래 코드는 **흐름을 설명하기 위한 연관 코드**입니다. 이 코드를 포함하는 것과 본인이 UI 전체를 구현했다고 주장하는 것은 구분합니다.
-
-<details>
-<summary><b>코드 보기 — UI에 선택지 표시 (AugmentWindowBehavior.FillCards)</b></summary>
-
-```csharp
-private void FillCards()
-{
-    if (Managers.Instance == null ||
-        !Managers.Instance.TryGetManager<UpgradeManager>(out var upgradeManager))
-    {
-        return;
-    }
-
-    var choices = upgradeManager.CurrentChoices;
-
-    for (var i = 0; i < _cards.Length; i++)
-    {
-        var card = _cards[i];
-
-        var visible =
-            choices != null &&
-            i < choices.Count &&
-            choices[i] != null;
-
-        card.gameObject.SetActive(visible);
-
-        if (!visible)
-        {
-            continue;
-        }
-
-        var choice = choices[i];
-        var currentLevel = upgradeManager.GetLevel(choice.Id);
-        var nextLevel = currentLevel + 1;
-
-        card.Label.text =
-            $"{choice.Name}\n\n" +
-            $"Lv.{currentLevel} → Lv.{nextLevel}/{choice.MaxLevel}\n\n" +
-            FormatEffects(choice);
-
-
-        var icon = Resources.Load<Sprite>(choice.IconPath);
-
-        if (icon != null)
-        {
-            // 회색 ArtBackground 위에 실제 Sprite를 표시한다.
-            card.Icon.sprite = icon;
-            card.Icon.color = Color.white;
-            card.Icon.enabled = true;
-        }
-        else
-        {
-            // 아이콘만 숨긴다.
-            // ArtBackground는 별도 Image라서 그대로 남는다.
-            card.Icon.sprite = null;
-            card.Icon.color = Color.clear;
-
-            Debug.LogWarning(
-                $"[Augment UI] Sprite를 찾지 못했습니다. " +
-                $"Upgrade={choice.Id}, Path={choice.IconPath}",
-                this
-            );
-        }
-
-        card.Button.onClick.RemoveAllListeners();
-
-        var choiceIndex = i;
-        card.Button.onClick.AddListener(() => Choose(choiceIndex));
-
-        // [트레이닝] 기존 코드는 그대로 두고, 새로 만든 SetupCard로 등급 색을 칠하고 클릭을 제외 모드와 함께 받는다.
-        SetupCard(card, choice, choiceIndex);
-    }
-}
-```
-
-*연관 코드 발췌: `Assets/Runtime/Scripts/UI/AugmentWindowBehavior.cs`. 기여자별 소유·수정 범위는 별도 확인 후 표기합니다.*
-</details>
+선택 화면은 `AugmentWindowBehavior`가 담당합니다. 이 클래스는 매니저가 준비한 `CurrentChoices`를 읽어 카드의 이름, 현재·다음 Level, 효과 설명을 채우고, 카드를 누르면 `TrySelectChoice`를 호출합니다.
+TrySelectChoice는 상술한 흐름으로, 해당 선택지에 존재하는 데이터를 적용하는 로직을 실행합니다.
 
 ---
 
 ## 2. 적 스폰 및 관리
 
-`EnemyManager`는 스폰 요청을 받아 활성 적을 관리합니다. 스폰 수는 현재 Stage 상태, 플레이어 식별자, 최대 활성 수 등의 조건에 따라 제한합니다. 적의 생성·재사용은 아래 Object Pool과 연결됩니다.
+`EnemyManager`가 스폰 요청을 받아 활성 적 목록을 관리합니다. 스테이지가 활성화되어 있지 않거나, 보스전 중이거나, 요청한 플레이어가 맞지 않거나, 이미 최대 활성 수(`MAX_ALIVE`)에 도달했으면 스폰하지 않습니다.
 
-`Wave 요청 → Spawn 위치 결정 → CreateEnemy → Pool.Get → 활성 목록 관리 → 사망 처리 및 반환`
+`Wave 요청 → 스폰 위치 결정 → CreateEnemy → Pool.Get → 활성 목록 관리 → 사망 처리 및 반환`
+
+enemy의 스폰은 player 주변의 카메라 화면 밖에서 스폰되도록 하였습니다. (circle wave는 별도 거리 계산)
+player의 이동에 따라 카메라 위치가 달라지므로 Spawn Point를 고정하지 않고, 카메라 외곽을 기준으로 후보 위치를 계산한 뒤 `StageFieldManager`를 통해 위치가 유효한지 확인합니다.
+
+> **[수정 필요 — 실제 맵 구조와 스폰 설계 이유]**
+> 기존에 적어둔 '무한으로 뻗어나가는 맵' 설명이 최종 빌드의 맵 경계 및 스폰 제한과 일치하는지 확인하고, 본인이 결정한 설계 이유를 적어주세요.
+> [여기에 직접 작성]
+
+실제 runtime중에 생성되는 wave의 설정 및 관리는 팀원이 구현한 timeline기반의 관리 시스템을 사용하였습니다.
+
+> **[수정 필요 — 레벨 디자인에서 직접 담당한 작업]**
+> 담당 구현에 '레벨 디자인'을 적어두었으므로, 본인이 직접 조정한 Wave 시간대, 적 종류/비율, 스폰 수량, 보스 등장 시점과 조정 근거 중 실제 수행한 것만 적어주세요.
+> [여기에 직접 작성]
 
 <details>
-<summary><b>코드 보기 — 스폰 조건과 생성 반복 (EnemyManager.SpawnWave)</b></summary>
+<summary><b>코드 보기 — 스폰 위치 결정 (EnemyManager.ResolveSpawnPosition)</b></summary>
 
 ```csharp
-public int SpawnWave(int playerId, MonsterWaveProfile profile, int count, bool circularSpawn, Action<Enemy> onDied)
+private Vector2 ResolveSpawnPosition(Vector2 playerPosition, int amount, bool circularSpawn)
 {
-    if (!_stageActive || _bossFightActive || playerId != _playerId || profile == null || count <= 0)
+    var extra = amount > LARGE_SPAWN_AMOUNT ? Mathf.Sqrt(_alive.Count) * LARGE_SPAWN_SPREAD : 0f;
+    if (!TryGetCamera(out var camera) || camera.ViewDiagonal <= 0f)
     {
-        return 0;
+        var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+        return AcceptOrBorder(playerPosition + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * FALLBACK_SPAWN_RADIUS, playerPosition);
     }
 
-    if (!TryGetPlayerPosition(out var playerPosition))
+    var diagonal = camera.ViewDiagonal;
+    var lastCandidate = playerPosition;
+    for (var attempt = 0; attempt < SPAWN_POSITION_TRIES; attempt++)
     {
-        return 0;
-    }
-
-    var spawned = 0;
-    for (var i = 0; i < count; i++)
-    {
-        if (_alive.Count >= MAX_ALIVE)
+        lastCandidate = circularSpawn
+            ? playerPosition + RandomDirection() * (diagonal * CIRCULAR_DISTANCE_MULTIPLIER + UnityEngine.Random.value * CIRCULAR_PADDING_RANDOM + extra)
+            : camera.GetRandomPointOutside(SPAWN_OUTSIDE_PADDING + UnityEngine.Random.value * SPAWN_PADDING_RANDOM + extra);
+        if (TryAcceptPosition(lastCandidate, out var accepted))
         {
-            break;
+            return accepted;
         }
-
-        var position = ResolveSpawnPosition(playerPosition, count, circularSpawn);
-        if (CreateEnemy(profile, position, onDied, true) == null)
-        {
-            break;
-        }
-
-        spawned++;
     }
 
-    return spawned;
+    return AcceptOrBorder(lastCandidate, playerPosition);
 }
 ```
 
-*발췌: `Assets/Runtime/Scripts/Managers/EnemyManager.cs` — 연결된 저장소 `main` 기준.*
+`Assets/Runtime/Scripts/Managers/EnemyManager.cs`
 </details>
 
 ---
 
-## 3. 전투 Object Pooling
+## 3. 전투 오브젝트 풀
 
-적과 투사체의 반복적인 생성·파괴를 줄이기 위한 재사용 로직입니다. `CombatObjectPool`은 Prefab별 보관 Stack과 대여 중인 객체 집합을 유지합니다. `EnemyManager`가 전투 상태를 관리하고 Pool은 재사용·반환 여부만 결정합니다.
+적과 투사체를 매번 만들고 파괴하지 않고 재사용하기 위한 구조입니다. `CombatObjectPool`은 적 Prefab별로 쓰지 않는 객체를 Stack에 보관하고, 대여 중인 객체를 따로 추적합니다. 투사체는 `EnemyManager`에서 별도로 재사용합니다. 전투 상태 관리는 `EnemyManager`가 하고, `CombatObjectPool`은 객체 재사용과 반환만 맡습니다.
+
+특출나게 차별화되는 최적화 알고리즘이 적용되어있지는 않지만, `EnemyManager`가 `_alive` 목록으로 활성화중인 enemy를 관리하고 있어 Collider를 통한 탐색 없이 해당 정보를 조회할 수 있습니다. 이는 Object Pool 자체가 아닌 활성 적 목록 관리의 역할입니다.
+
+최종빌드에 적용되진 않았지만 이 활성 적 목록을 활용하여 enemy를 미니맵에 표시해보자 같은 다양한 활용 방안이 논의될 수 있었습니다.
 
 `Pool.Get → Enemy 초기화 및 사용 → 사망 후 상태 정리 → Pool.Return → 비활성 객체 재보관`
+
+`Return`은 대여 중인 객체 집합에서 제거하는 데 성공했을 때만 처리합니다. 그래서 같은 객체를 두 번 반환해도 Stack에는 한 번만 들어갑니다.
+
+기획 당시엔 굉장히 큰 규모로 wave가 만들어질것으로 전망이 되어 개발 초기단계에서 미리 구현된 시스템이었습니다.
+실제 게임플레이 A/B 테스트에서는 평균 Frame Time이 Pool ON 17.686ms, OFF 18.658ms로 ON에서 약 5.2% 낮게 관측되었습니다. 다만 측정 회수와 실행별 변동폭을 고려하면, Pooling으로 인한 성능 향상을 확정할 수는 없었습니다.
 
 <details>
 <summary><b>코드 보기 — 중복 반환 방지 (CombatObjectPool.Return)</b></summary>
@@ -322,13 +310,25 @@ public bool Return(GameObject instance)
 }
 ```
 
-*발췌: `Assets/Runtime/Scripts/Enemy/CombatObjectPool.cs` — 연결된 저장소 `main` 기준.*
+`Assets/Runtime/Scripts/Enemy/CombatObjectPool.cs`
 </details>
 
-**검증 범위:** 객체 재사용 및 중복 반환 방지 등의 동작 테스트를 진행했습니다. Pool 적용만으로 실제 플레이의 프레임 개선이 입증됐다고 단정하지 않습니다. 성능 비교는 테스트 환경과 측정값을 함께 제시할 수 있는 경우에만 결과를 추가합니다.
+### 검증
+
+Unity Editor Play Mode에서 같은 스테이지의 60~120초 구간을 Pool ON 3회, OFF 5회 측정하였습니다. 평균 활성 Enemy는 ON 45.40마리, OFF 45.80마리였으며, Prewarm 비용은 측정에서 제외하였습니다.
+
+별도의 재사용 기능 검사에서는 Enemy 객체 100회 재사용, 중복 반환 및 다른 Pool의 객체 반환 차단, `DestroyAll()` 경로를 확인하였습니다. 이는 재사용 기능을 확인한 테스트이며, 실제 게임의 모든 상황에서 정상 동작한다는 의미는 아닙니다.
+
+> **[수정 필요 — 테스트 환경 및 직접 검증한 범위]**
+> 실제 테스트에 사용한 PC 사양, 실행 환경, 본인이 수행한 검증 범위와 확인 가능한 로그 또는 CSV 경로를 적어주세요. 위의 수치는 보관된 측정 기록을 기준으로 정리하였습니다.
+> [여기에 직접 작성]
 
 ---
 
-## 코드 발췌에 관한 표기
+## 돌아보며
 
-이 README는 **팀 프로젝트의 전체 코드가 아니라, 설명에 필요한 핵심 부분을 발췌한 포트폴리오 초안**입니다. 본인이 직접 구현·수정한 내용과 전체 동작을 이해시키기 위해 인용한 팀원 코드를 구별합니다. 코드를 기재한 것만으로 작성 책임을 주장하지 않으며, 공개 전 팀 코드와 게임 리소스의 공개 가능 범위를 확인해야 합니다.
+클라이언트 개발 체계가 상당히 무질서하고 핵심 시스템들에 대한 개발 책임이 모호하게 잡혀있어 개발 착수 이전부터 불안하였지만 AI를 통한 프로젝트 분석 및 코드리뷰를 통한 교차 검증을 거쳐 프로젝트의 구조를 파악하였기 때문에, 임의의 시스템에 긴밀한 영향을 받는 관련한 여러 피쳐들을 병렬로 개발하였음에도, 서로의 구현 영역을 침범하지 않을수 있었습니다.
+
+---
+
+코드는 설명에 필요한 부분만 발췌한 것이고, 전체 코드는 팀 저장소에 있습니다. → https://github.com/SpartaTeam2Project/Client_ImTrainer (프로젝트는 사용한 asset의 저작권 관련 문제를 우려하여 공개수준이 private으로 설정되어있습니다.)

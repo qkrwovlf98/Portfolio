@@ -18,40 +18,31 @@ git을 이용하여 협업하였고, 정기적으로 매주 월요일, 그리고
 ## 담당 구현
 
 - 증강 시스템 (데이터 로딩, 후보 추첨, 효과 적용)
-- 적 스폰 및 관리(레벨 디자인)
-- 전투 오브젝트 풀
+- 오브젝트 풀
 
 ---
 
+
+
 ## 1. 증강 시스템
 
-레벨업하면 기본적으로 증강 후보 3개를 뽑아 보여주고, 플레이어가 고른 증강의 효과를 능력치에 반영합니다. 증강 데이터, 선택 결과, 효과는 `UpgradeManager`가 맡습니다.
+Flow
+`JSON형태의 증강 base data 로딩 → 후보 N개 추첨 → UI 표시 → 선택 → Level 갱신 및 Effect 적용`
 
-`JSON형태의 증강 base data 로딩
-→ 후보 N개 추첨
-→ UI 표시
-→ 선택
-→ Level 갱신 및 Effect 적용`
+레벨업과 동시에 활성화 됩니다.
+training manager의 현재 증강 선택지 갯수 필드를 선택지 출력 함수의 인자로 사용합니다.
 
-- base data 로딩 : runtime에 data를 올려서 JSON 원본파일을 수정하지 않습니다
+JSON에서 로딩한 증강 데이터를 별도의 런타임 데이터로 복사하여 관리합니다. 이를 통해 게임 진행 중 변경되는 증강 상태와 원본 데이터를 분리하고, 매 게임 시작 시 초기 상태로 복원할 수 있도록 구성했습니다.
 
-- 후보 N개 추첨 : weight값 및 특정 조건 기반 추첨, 트레이닝이나 다른 시스템을 통해 후보의 갯수에 변동이 생길 수 있습니다. 선정된 증강 data는 별도의 리스트에 데이터를 복사하여 관리합니다. 다음 레벨업 시점이나 reroll chance를 사용하기 전까지 리스트에 변동은 생기지 않습니다.
+선택지 선정 과정에서 weight값을 기반으로 대상 데이터를 랜덤하게 추첨하고, 참조를 가져와서 선택지 관리를 위한 리스트에 저장합니다.
 
-- UI 표시 : effect list의 effects 배열 내부의 데이터를 분석하여 실제 적용되는 수치와 효과, 증강 이름과 더불어 증강 data가 명시하고있는 경로를 따라 들어가 해당하는 증강 이미지를 화면에 표시합니다.
+증강 선택이 완료되면 선택한 증강의 레벨을 증가시키고, 효과 종류(enum으로 관리)를 통해 효과 처리 방식을 결정, 구체적인 수치들을 적용시킵니다.
 
-- level 갱신 및 Effect 적용 : upgrade manager에서 앞서 전달받았던 증강 데이터, 선택 결과를 받아 해당 명령을 바탕으로 구체적인 효과의 처리를 관련 manager들의 API 호출을 통해 적용하게 됩니다. 증강 효과를 적용할 때 upgrade manager가 객체의 필드를 직접적으로 참조하거나 객체를 직접적으로 참조하지 않고 반드시 관리객체인 manager들을 호출하여 처리하도록 하였습니다. 때문에 구체적인 효과 적용이 어떤방식으로 이루어지는지는 관리객체 manager들의 API내부 구현에 의존하게 되고 외부 system은 객체 내부 구현 사항과 독립된 형태로 동작하게 되는 구조를 의도하였습니다.
+또한 증강 레벨이 최대치에 도달하거나, 다른 조건의 선택지를 막는 임의의 증강의 경우, 선택한 이후 지정한 증강들의 weight값을 조정하는 처리가 더해집니다.
 
 
-최초 기획에서 결정된 사항으로는, 증강에 대한 데이터를 서버에 저장하여, 진행한 Run의 유효성을 검사하는것으로 기획이 되었으나.
-개발 기간안에 서버에서 반영하는 구조를 완성하지 못하여 Json을 이용하여 증강데이터를 관리하는 구조만 남게 되었습니다.
-
-
-### 후보 뽑기
-
-후보마다 현재 `Weight`를 가지고 가중치 추첨을 합니다. 실제 선택지 개수는 `RollChoices()`에 전달되는 `count`를 따릅니다. 한 번 뽑힌 증강은 같은 선택 화면에서 다시 나오지 않도록 후보 목록에서 빼고, 최대 Level에 도달했거나 조건이 안 맞는 증강은 `GetWeight()`가 0을 반환해서 처음부터 후보에 들어가지 않습니다.
-
-후보를 추첨하는 시스템은 기획단계에서 단계별 증강 업그레이드나, 증강 트리같은 컨텐츠들이 언급이 되어 조건검사를 통해 가중치에 변화를 주는 구현을 하였습니다.
-실제로, 최종 결과물에도 테이블에 존재하는 기본 증강들을 모두 최종레벨까지 달성하였을때에 해금되는 한계 돌파 증강, 그리고 게임중에 단 하나만 찍을 수 있는 에픽 증강 시스템을 도입하여 테이블을 유동적으로 관리하였습니다.
+### 선택지 추첨
+weight값을 기반으로 추첨합니다.
 
 <details>
 <summary><b>코드 보기 — 후보 가중치 추첨 (UpgradeManager.RollChoices / PickWeighted)</b></summary>
@@ -77,7 +68,8 @@ private void RollChoices(int count)
     }
 }
 
-// 가중치 비례로 하나를 고른다. Random.value가 1일 때는 마지막 후보다.
+// 전체 비율에 따른 추첨이기 때문에 random값과 가중치 전체 크기를 곱한다.
+// 그 후 리스트 순서대로 가중치값을 감산하여, 랜덤값이 0이하로 내려가는 순간의 데이터를 대상으로 선정하여 return합니다.
 private UpgradeDefinition PickWeighted(List<UpgradeDefinition> candidates)
 {
     if (candidates.Count == 0)
@@ -104,19 +96,8 @@ private UpgradeDefinition PickWeighted(List<UpgradeDefinition> candidates)
 `Assets/Runtime/Scripts/Managers/UpgradeManager.cs`
 </details>
 
-### 효과 적용
-
-카드를 누르면 `TrySelectChoice`가 선택 인덱스와 현재 선택 가능 상태를 확인하고, 증강 Level을 올린 뒤 Effect 종류에 따라 `PlayerManager`에 통해 적절한 API 호출 및 데이터를 전달합니다.
-
-Effect에 대한 데이터를 정의하는 데이터 클래스를 만들고 각 효과에 대한 데이터 처리 방법을 다르게 하기위해 Effect의 종류는 enum으로 만들어 관리하였습니다.
-증강데이터에서 파싱한 effect list의 효과 목록을 순회하며 각각의 효과에 대한 개별 수치를 받아 switch문으로 처리하였습니다.
-
-Effect외에도 특정 조건을 만족할경우 조건에 맞는 증강들을 막는 구현은 관리하는 시스템이 아닌 개별적으로 하드코딩하여 구현하게 되었습니다.
-예시로 에픽등급에 해당하는 Grade 2 한 판에 하나만 가질 수 있는 상위 증강이라서, 하나를 고르면 나머지는 후보에서 빠지게 했습니다.
-
-UI는 능력치를 직접 건드리지 않고 플레이어가 어떤 데이터를 선택했는지 upgrade manager에 전달합니다.
-효과의 실행은 upgrade manager가 관련 메서드를 통해  분석하여 적절한 효과를 적용하는 flow로 구현하였습니다.
-
+### 효과의 처리
+효과의 종류를 사전에 enum으로 정의해놓았고, 각각에 대한 처리를 switch문으로 분기하였습니다.
 
 <details>
 <summary><b>코드 보기 — 선택 검증 및 효과 적용 (UpgradeManager.TrySelectChoice)</b></summary>
@@ -206,117 +187,199 @@ public bool TrySelectChoice(int choiceIndex)
 `Assets/Runtime/Scripts/Managers/UpgradeManager.cs`
 </details>
 
-### UI와 연결되는 지점
-
-선택 화면은 `AugmentWindowBehavior`가 담당합니다. 이 클래스는 매니저가 준비한 `CurrentChoices`를 읽어 카드의 이름, 현재·다음 Level, 효과 설명을 채우고, 카드를 누르면 `TrySelectChoice`를 호출합니다.
-TrySelectChoice는 상술한 흐름으로, 해당 선택지에 존재하는 데이터를 적용하는 로직을 실행합니다.
-
 ---
 
-## 2. 적 스폰 및 관리
 
-`EnemyManager`가 스폰 요청을 받아 활성 적 목록을 관리합니다. 스테이지가 활성화되어 있지 않거나, 보스전 중이거나, 요청한 플레이어가 맞지 않거나, 이미 최대 활성 수(`MAX_ALIVE`)에 도달했으면 스폰하지 않습니다.
+## 2. 전투 오브젝트 풀
 
-`Wave 요청 → 스폰 위치 결정 → CreateEnemy → Pool.Get → 활성 목록 관리 → 사망 처리 및 반환`
-
-enemy의 스폰은 player 주변의 카메라 화면 밖에서 스폰되도록 하였습니다. (circle wave는 별도 거리 계산)
-player의 이동에 따라 카메라 위치가 달라지므로 Spawn Point를 고정하지 않고, 카메라 외곽을 기준으로 후보 위치를 계산한 뒤 `StageFieldManager`를 통해 위치가 유효한지 확인합니다.
-
-실제 runtime중에 생성되는 wave의 설정 및 관리는 팀원이 구현한 timeline기반의 관리 시스템을 사용하였습니다.
-
-레벨 디자인은 중간보스 시점에 최종진화체 1체, 보스 대면 시점에 최종 진화체 3성+최종 진화체 1체 or 최종진화체3체 이상이 파티에 구성되도록 자원 수급량을 직접 플레이를 통한 테스트 기반으로 조정하였습니다.
-
-<details>
-<summary><b>코드 보기 — 스폰 위치 결정 (EnemyManager.ResolveSpawnPosition)</b></summary>
-
-```csharp
-private Vector2 ResolveSpawnPosition(Vector2 playerPosition, int amount, bool circularSpawn)
-{
-    var extra = amount > LARGE_SPAWN_AMOUNT ? Mathf.Sqrt(_alive.Count) * LARGE_SPAWN_SPREAD : 0f;
-    if (!TryGetCamera(out var camera) || camera.ViewDiagonal <= 0f)
-    {
-        var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-        return AcceptOrBorder(playerPosition + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * FALLBACK_SPAWN_RADIUS, playerPosition);
-    }
-
-    var diagonal = camera.ViewDiagonal;
-    var lastCandidate = playerPosition;
-    for (var attempt = 0; attempt < SPAWN_POSITION_TRIES; attempt++)
-    {
-        lastCandidate = circularSpawn
-            ? playerPosition + RandomDirection() * (diagonal * CIRCULAR_DISTANCE_MULTIPLIER + UnityEngine.Random.value * CIRCULAR_PADDING_RANDOM + extra)
-            : camera.GetRandomPointOutside(SPAWN_OUTSIDE_PADDING + UnityEngine.Random.value * SPAWN_PADDING_RANDOM + extra);
-        if (TryAcceptPosition(lastCandidate, out var accepted))
-        {
-            return accepted;
-        }
-    }
-
-    return AcceptOrBorder(lastCandidate, playerPosition);
-}
-```
-
-`Assets/Runtime/Scripts/Managers/EnemyManager.cs`
-</details>
-
----
-
-## 3. 전투 오브젝트 풀
-
-적과 투사체를 매번 만들고 파괴하지 않고 재사용하기 위한 구조입니다. `CombatObjectPool`은 적 Prefab별로 쓰지 않는 객체를 Stack에 보관하고, 대여 중인 객체를 따로 추적합니다. 투사체는 `EnemyManager`에서 별도로 재사용합니다. 전투 상태 관리는 `EnemyManager`가 하고, `CombatObjectPool`은 객체 재사용과 반환만 맡습니다.
+Prefab을 기준으로 전투 객체의 생성, 재사용 및 반환을 관리하는 Object Pool을 구현했습니다.
+최초 기획당시, 오브젝트 풀의 적용 범위를 enemy, projectile, maptile등등 넓은 범위로 사용 될 것을 상정하고 만들어졌기 때문에 prefab을 기준으로 리스트를 나눠서 관리하게 구현하였습니다.
+`CombatObjectPool`은 적 Prefab별로 쓰지 않는 객체를 Stack에 보관하고, 대여 중인 객체를 따로 추적합니다. 투사체는 `EnemyManager`에서 별도로 재사용합니다.
+따라서 실질적인 전투 상태 관리는 `EnemyManager`가 하고, `CombatObjectPool`은 객체 재사용과 반환만 맡습니다.
 
 `Pool.Get → Enemy 초기화 및 사용 → 사망 후 상태 정리 → Pool.Return → 비활성 객체 재보관`
 
 `Return`은 대여 중인 객체 집합에서 제거하는 데 성공했을 때만 처리합니다. 그래서 같은 객체를 두 번 반환해도 Stack에는 한 번만 들어갑니다.
 
-
-차별화되는 최적화 알고리즘이 적용되어있지는 않지만, `EnemyManager`가 `_alive` 목록으로 활성화중인 enemy를 관리하고 있어 Collider를 통해 별도의 탐색알고리즘 없이 맵에 존재하는 활성 enemy 전체 정보를 조회할 수 있습니다. 이는 Object Pool 자체가 아닌 활성 적 목록 관리의 역할입니다.
-
-최종빌드에 적용되진 않았지만 이 활성 enemy list를 활용하여 enemy를 미니맵에 표시해보자 같은 다양한 활용 방안이 논의될 수 있었습니다.
-
-
 기획 당시엔 굉장히 큰 규모로 wave가 만들어질것으로 전망이 되어 개발 초기단계에서 미리 구현된 시스템이었습니다.
 실제 게임플레이 A/B 테스트에서는 평균 Frame Time이 Pool ON 17.686ms, OFF 18.658ms로 ON에서 약 5.2% 낮게 관측되었습니다. 다만 측정 회수와 실행별 변동폭을 고려하면, Pooling으로 인한 성능 향상을 확정할 수는 없었습니다.
 
+**Test PC 환경**
+
+- OS: Windows 11 Pro
+- CPU: Intel Core i7-8750H (6C/12T)
+- GPU: NVIDIA GeForce GTX 1060
+- RAM: 16GB
+- Storage: SATA SSD
+
 <details>
-<summary><b>코드 보기 — 중복 반환 방지 (CombatObjectPool.Return)</b></summary>
+<summary><b>`Assets/Runtime/Scripts/Enemy/CombatObjectPool.cs`</b></summary>
 
 ```csharp
-public bool Return(GameObject instance)
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// Prefab별 객체 생성, 재사용, 반환을 담당한다. Enemy 상태와 Spawn 조건은 관리하지 않는다.
+/// 흐름: Get(prefab, position) => 재사용 또는 최초 생성 => 활성화 => 호출자가 초기화.
+/// 반환: 호출자가 상태 정리 => Return => 비활성 보관. Scene 종료 시 DestroyAll로 정리한다.
+/// </summary>
+public sealed class CombatObjectPool
 {
-    if (_disposed || instance == null || !_inUse.Remove(instance))
+    private readonly Dictionary<GameObject, Stack<GameObject>> _available = new Dictionary<GameObject, Stack<GameObject>>();
+    private readonly Dictionary<GameObject, GameObject> _prefabs = new Dictionary<GameObject, GameObject>();
+    private readonly HashSet<GameObject> _inUse = new HashSet<GameObject>();
+    private readonly Transform _root;
+    private bool _disposed;
+
+    public Transform Root => _root;
+
+    public CombatObjectPool(Transform stageRoot)
     {
-        return false;
+        _root = new GameObject("CombatObjectPool").transform;
+        // 기존 Enemy의 World 좌표/크기를 유지하며 게임 Scene에 수명을 묶는다.
+        _root.SetParent(stageRoot, true);
     }
 
-    instance.SetActive(false);
-    if (_root != null)
+    /// <summary>
+    /// 같은 Prefab의 비활성 객체를 재사용하거나 생성하여 지정 위치에서 활성화한다.
+    /// 호출자는 반환 직후 Bind/Initialize를 끝내고 Tick 대상에 등록한다.
+    /// </summary>
+    public GameObject Get(GameObject prefab, Vector3 position, Quaternion rotation)
     {
+        if (_disposed || _root == null || prefab == null)
+        {
+            return null;
+        }
+
+        if (!_available.TryGetValue(prefab, out var available))
+        {
+            available = new Stack<GameObject>();
+            _available.Add(prefab, available);
+        }
+
+        GameObject instance = null;
+        while (available.Count > 0 && instance == null)
+        {
+            instance = available.Pop();
+            if (instance == null)
+            {
+                // Scene 정리 등으로 이미 파괴된 Unity Object 참조는 재사용하지 않는다.
+                _prefabs.Remove(instance);
+            }
+        }
+
+        if (instance == null)
+        {
+            instance = Object.Instantiate(prefab, position, rotation, _root);
+            _prefabs.Add(instance, prefab);
+        }
+
         instance.transform.SetParent(_root, false);
+        instance.transform.SetPositionAndRotation(position, rotation);
+        instance.transform.localScale = prefab.transform.localScale;
+        _inUse.Add(instance);
+        instance.SetActive(true);
+        return instance;
     }
 
-    var prefab = _prefabs[instance];
-    if (prefab != null)
+    /// <summary>
+    /// 보관 수가 count가 될 때까지 미리 만들어 비활성으로 둔다.
+    /// </summary>
+    public void Prewarm(GameObject prefab, int count)
     {
-        _available[prefab].Push(instance);
+        if (_disposed || _root == null || prefab == null)
+        {
+            return;
+        }
+
+        if (!_available.TryGetValue(prefab, out var available))
+        {
+            available = new Stack<GameObject>();
+            _available.Add(prefab, available);
+        }
+
+        for (var i = available.Count; i < count; i++)
+        {
+            var instance = Object.Instantiate(prefab, _root);
+            instance.SetActive(false);
+            _prefabs.Add(instance, prefab);
+            available.Push(instance);
+        }
     }
 
-    return true;
+    /// <summary>
+    /// 호출자가 상태를 정리한 객체를 비활성화해 원래 Prefab의 Pool에 돌려놓는다.
+    /// 중복 반환, 다른 Pool의 객체, null/파괴된 객체는 false를 반환한다.
+    /// </summary>
+    public bool Return(GameObject instance)
+    {
+        if (_disposed || instance == null || !_inUse.Remove(instance))
+        {
+            return false;
+        }
+
+        instance.SetActive(false);
+        if (_root != null)
+        {
+            instance.transform.SetParent(_root, false);
+        }
+
+        var prefab = _prefabs[instance];
+        if (prefab != null)
+        {
+            _available[prefab].Push(instance);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Scene을 떠날 때 보관 중인 객체와 Root를 파괴한다. 이후 Get은 사용할 수 없다.
+    /// EnemyManager는 이 메서드 전에 활성 Enemy를 정상 반환하여 Owner를 해제한다.
+    /// </summary>
+    public void DestroyAll()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        foreach (var instance in _prefabs.Keys)
+        {
+            if (instance != null)
+            {
+                instance.SetActive(false);
+                Object.Destroy(instance);
+            }
+        }
+
+        _inUse.Clear();
+        _prefabs.Clear();
+        _available.Clear();
+        if (_root != null)
+        {
+            // Prefab 미지정 시 사용하는 비활성 자리표시 원본도 함께 정리된다.
+            Object.Destroy(_root.gameObject);
+        }
+    }
 }
 ```
 
-`Assets/Runtime/Scripts/Enemy/CombatObjectPool.cs`
 </details>
-
-### 테스트
-
-Unity Editor Play Mode에서 같은 스테이지의 60~120초 구간을 Pool ON 5회, OFF 5회 측정하였습니다. 평균 활성 Enemy는 ON 45.40마리, OFF 45.80마리였으며, Prewarm 비용은 측정에서 제외하였습니다.
 
 ---
 
-## 돌아보며
+## 회고
+이번 프로젝트에서는 개발 초기 회의를 통해 주요 시스템의 역할과 담당 Manager를 구분하고 구현을 시작했습니다.
 
-역할 경계가 명확하지 않은 상황에서 AI 코드리뷰 및 git 관리, 그리고 manager와 연동되는 시스템 구현시 구현 담당자와의 코드 리뷰를 통해 서로의 구현 영역을 교차 확인하였고.  충돌 없이 병렬로 개발할 수 있었습니다.
+기획 단계에서 결정된 게임의 핵심 기능을 기준으로 각 시스템의 책임과 의존 관계를 정리하고, 이를 관리할 Manager Class를 먼저 구성한 뒤 세부 기능을 구현했습니다.
+
+덕분에 각자 개발한 기능을 통합하는 과정에서 시스템 간 연결 지점을 파악하고 필요한 기능을 추가하기가 비교적 수월했습니다.
+
+여러 개발자가 협업하는 환경에서는 개발 초기부터 시스템의 책임과 관계를 명확하게 정의하고 공유하는 것이 중요하다는 점을 경험했습니다.
+
 
 ---
 

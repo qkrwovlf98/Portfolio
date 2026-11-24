@@ -5,44 +5,37 @@
 ![나는 트레이너다 타이틀 로고](./images/title.png)
 ![인게임 증강 선택](./images/증강1.png)
 
-웨이브로 몰려오는 적을 잡고, 레벨업할 때마다 증강을 골라 캐릭터를 키우는 2D 탑다운 서바이벌 게임입니다.
-
+웨이브로 몰려오는 적을 처치하고, 레벨업마다 증강을 선택하여 캐릭터를 성장시키는 2D 탑다운 서바이벌 게임입니다.
 
 프로젝트 기간 : 2026년 9월 27일 ~ 2026년 10월 21일  
 팀 구성 : 클라이언트 개발 3인 / 서버 개발 2인  
 담당 포지션 : 클라이언트 개발  
-git을 이용하여 협업하였고, 정기적으로 매주 월요일, 그리고 필요에 따라 비정기 회의를 소집하여 개발 진행 사항과 특히 서버와 클라이언트간 조율과 피드백을 진행하였습니다.
-클라이언트 개발은 정기회의 직후 추가적으로 자체 회의를 실시하여, 그 주에 새로 추가할 기능들을 논의하였고, 그중에 각자 구현하길 원하는 기능들을 선택하여 구현하는 방식으로 개발되었습니다.
 
+Git을 이용해 협업하였으며, 서버 개발자와 API 규격을 조율하고 클라이언트 기능을 연동했습니다.
 
 ## 담당 구현
 
-- 증강 시스템 (데이터 로딩, 후보 추첨, 효과 적용)
-- 오브젝트 풀
+- 증강 시스템 (JSON 데이터 로딩, 가중치 기반 후보 추첨, 효과 적용)
+- HTTP 인증 및 Master Data 동기화 (자동 로그인, Token Refresh, Hash 검증)
+- 전투 Object Pool (적 객체 생성, 재사용 및 반환)
 
 ---
 
-
-
 ## 1. 증강 시스템
 
-Flow
-`JSON형태의 증강 base data 로딩 → 후보 N개 추첨 → UI 표시 → 선택 → Level 갱신 및 Effect 적용`
+Flow  
+`JSON 로딩 → 후보 추첨 → UI 표시 → 선택 → Level 갱신 및 Effect 적용`
 
-레벨업과 동시에 활성화 됩니다.
-training manager의 현재 증강 선택지 갯수 필드를 선택지 출력 함수의 인자로 사용합니다.
+레벨업 시 활성화되는 증강 선택 시스템을 구현했습니다.
 
-JSON에서 로딩한 증강 데이터를 별도의 런타임 데이터로 복사하여 관리합니다. 이를 통해 게임 진행 중 변경되는 증강 상태와 원본 데이터를 분리하고, 매 게임 시작 시 초기 상태로 복원할 수 있도록 구성했습니다.
-
-선택지 선정 과정에서 weight값을 기반으로 대상 데이터를 랜덤하게 추첨하고, 참조를 가져와서 선택지 관리를 위한 리스트에 저장합니다.
-
-증강 선택이 완료되면 선택한 증강의 레벨을 증가시키고, 효과 종류(enum으로 관리)를 통해 효과 처리 방식을 결정, 구체적인 수치들을 적용시킵니다.
-
-또한 증강 레벨이 최대치에 도달하거나, 다른 조건의 선택지를 막는 임의의 증강의 경우, 선택한 이후 지정한 증강들의 weight값을 조정하는 처리가 더해집니다.
-
+JSON에서 불러온 증강 데이터를 런타임에서 별도로 관리하여 게임 진행 중 변경되는 상태와 원본 데이터를 분리하고, 새로운 게임을 시작할 때 초기 상태로 복원할 수 있도록 구성했습니다.
 
 ### 선택지 추첨
-weight값을 기반으로 추첨합니다.
+
+각 증강의 Weight를 기준으로 후보를 추첨합니다. 추첨된 증강은 후보 목록에서 제거하여 동일한 선택지에 중복으로 등장하지 않도록 했습니다.
+
+최대 Level에 도달한 증강은 GetWeight()에서 0을 반환하여 추첨 대상에서 제외합니다. 또한 에픽 등급 증강을 선택하면 해당 등급의 다른 증강이 이후 후보에 등장하지 않도록 Weight를 변경합니다.
+
 
 <details>
 <summary><b>코드 보기 — 후보 가중치 추첨 (UpgradeManager.RollChoices / PickWeighted)</b></summary>
@@ -96,8 +89,13 @@ private UpgradeDefinition PickWeighted(List<UpgradeDefinition> candidates)
 `Assets/Runtime/Scripts/Managers/UpgradeManager.cs`
 </details>
 
-### 효과의 처리
-효과의 종류를 사전에 enum으로 정의해놓았고, 각각에 대한 처리를 switch문으로 분기하였습니다.
+
+### 효과 적용
+
+증강 선택 시 해당 증강의 Level을 증가시키고, UpgradeEffectType에 따라 PlayerManager의 효과 적용 API를 호출합니다.
+
+이동속도, 경험치 획득량, 받는 피해 등의 효과를 같은 선택 흐름에서 처리하도록 구성했습니다. 아래 코드의 Grade 2는 에픽 등급을 나타냅니다.
+
 
 <details>
 <summary><b>코드 보기 — 선택 검증 및 효과 적용 (UpgradeManager.TrySelectChoice)</b></summary>
@@ -187,30 +185,208 @@ public bool TrySelectChoice(int choiceIndex)
 `Assets/Runtime/Scripts/Managers/UpgradeManager.cs`
 </details>
 
+
 ---
 
+## 2. HTTP 인증 및 Master Data 동기화
 
-## 2. 전투 오브젝트 풀
+서버와 연동하기 위한 초기 HTTP 통신 구조를 설계하고 구현했습니다.
 
-Prefab을 기준으로 전투 객체의 생성, 재사용 및 반환을 관리하는 Object Pool을 구현했습니다.
-최초 기획당시, 오브젝트 풀의 적용 범위를 enemy, projectile, maptile등등 넓은 범위로 사용 될 것을 상정하고 만들어졌기 때문에 prefab을 기준으로 리스트를 나눠서 관리하게 구현하였습니다.
-`CombatObjectPool`은 적 Prefab별로 쓰지 않는 객체를 Stack에 보관하고, 대여 중인 객체를 따로 추적합니다. 투사체는 `EnemyManager`에서 별도로 재사용합니다.
-따라서 실질적인 전투 상태 관리는 `EnemyManager`가 하고, `CombatObjectPool`은 객체 재사용과 반환만 맡습니다.
+- `ApiClient` : HTTP 요청 전송 및 응답 반환
+- `TokenStorage` : Access Token과 Refresh Token의 로컬 저장 및 관리
+- `SplashController` : 자동 로그인, 인증 오류 처리 및 화면 전환
 
-`Pool.Get → Enemy 초기화 및 사용 → 사망 후 상태 정리 → Pool.Return → 비활성 객체 재보관`
+### 자동 로그인 및 Token Refresh
 
-`Return`은 대여 중인 객체 집합에서 제거하는 데 성공했을 때만 처리합니다. 그래서 같은 객체를 두 번 반환해도 Stack에는 한 번만 들어갑니다.
+`Token 확인 → Master Data 요청 → 응답 처리 → 로비 진입`
 
-기획 당시엔 굉장히 큰 규모로 wave가 만들어질것으로 전망이 되어 개발 초기단계에서 미리 구현된 시스템이었습니다.
-실제 게임플레이 A/B 테스트에서는 평균 Frame Time이 Pool ON 17.686ms, OFF 18.658ms로 ON에서 약 5.2% 낮게 관측되었습니다. 다만 측정 회수와 실행별 변동폭을 고려하면, Pooling으로 인한 성능 향상을 확정할 수는 없었습니다.
+저장된 Access Token을 사용하여 Master Data를 요청합니다. 서버에서 401 Unauthorized가 반환되면 Refresh Token으로 재발급을 요청하고, 성공 시 갱신된 두 Token을 저장한 뒤 새로운 Access Token으로 기존 요청을 한 번 재시도합니다.
 
-**Test PC 환경**
+재시도 후에도 401이 반환되면 저장된 Token을 삭제하고 오류를 표시합니다. canRefresh 인자를 통해 재발급 이후 동일한 인증 요청이 반복되지 않도록 구성했습니다.
 
-- OS: Windows 11 Pro
-- CPU: Intel Core i7-8750H (6C/12T)
-- GPU: NVIDIA GeForce GTX 1060
-- RAM: 16GB
-- Storage: SATA SSD
+
+<details>
+<summary><b>코드 보기 — 인증 실패 처리 및 Token Refresh (SplashController)</b></summary>
+
+```csharp
+// HandleMasterDataResponse() 중 401 응답 처리
+if (result.StatusCode == 401)
+{
+    ErrorResponse error = ParseError(result.Body);
+
+    Debug.Log($"[SplashController] 401 Unauthorized: {error?.message}");
+
+    // Refresh 이후에도 인증이 실패했다면 토큰을 삭제한다.
+    if (!canRefresh)
+    {
+        TokenStorage.Clear();
+        ShowError(error?.message ?? "인증에 실패하였습니다.");
+        return;
+    }
+
+    // 기존 RefreshToken으로 재발급을 시도한다.
+    HandleUnauthorized();
+    return;
+}
+
+private void HandleUnauthorized()
+{
+    if (!TokenStorage.TryLoad(out _, out string oldRefreshToken))
+    {
+        ShowTitle();
+        return;
+    }
+
+    StartCoroutine(_apiClient.PostRequestToken(oldRefreshToken, HandleRefreshResponse));
+}
+
+// HandleRefreshResponse() 중 200 응답 처리
+if (result.StatusCode == 200)
+{
+    RefreshTokenResponse response = JsonUtility.FromJson<RefreshTokenResponse>(result.Body);
+
+    if (response == null || string.IsNullOrEmpty(response.accessToken) || string.IsNullOrEmpty(response.refreshToken))
+    {
+        Debug.LogError("[SplashController] Refresh 응답을 읽지 못했습니다.");
+        ShowError("인증 정보를 갱신하지 못했습니다.");
+        return;
+    }
+
+    TokenStorage.Save(response.accessToken, response.refreshToken);
+
+    Debug.Log("[SplashController] Token 재발급 성공.");
+
+    // 재발급된 accessToken으로 원래 요청을 1회 재시도한다.
+    RequestMasterData(response.accessToken, false);
+
+    return;
+}
+
+private void RequestMasterData(string accessToken, bool canRefresh)
+{
+    string requestJson = MasterDataStorage.BuildRequestJson();
+    StartCoroutine(_apiClient.PostMasterData(
+        accessToken,
+        result => HandleMasterDataResponse(result, canRefresh)
+        ,requestJson)
+        );
+}
+```
+
+`Assets/Runtime/Scripts/HTTP/SplashController.cs` — 초기 구현 커밋 `ceb838dc`에서 관련 부분 발췌
+</details>
+
+
+### Hash 기반 Master Data 동기화
+
+매번 전체 Master Data를 다운로드하지 않도록 SHA-256 Hash 기반 동기화의 클라이언트 처리를 구현했습니다.
+
+로컬 JSON의 Hash를 계산하여 서버에 전달하고, 서버에서 변경된 데이터를 반환하면 수신 데이터로 계산한 Hash와 서버가 보낸 Hash가 일치하는지 확인한 후 로컬 파일을 갱신합니다.
+
+로컬 데이터가 없으면 Hash 없이 요청하며, 변경 데이터가 반환되지 않으면 기존 로컬 데이터를 사용합니다.
+
+초기에는 Monster 데이터 동기화를 구현했으며, 이후 다른 팀원이 해당 구조를 5개 Master Data 테이블로 확장했습니다.
+
+
+<details>
+<summary><b>코드 보기 — 로컬 Hash 생성 및 데이터 검증 (MasterDataStorage)</b></summary>
+
+```csharp
+public static string BuildRequestJson()
+{
+    // 저장된 데이터가 없으면 전체 데이터 요청
+    if (!TryLoadMonster(out string data))
+    {
+        return "{\"hashes\":{}}";
+    }
+
+    // 로컬 JSON 문자열 자체를 SHA-256으로 계산
+    string hash = ComputeHash(data);
+
+    var request = new MasterDataRequest
+    {
+        hashes = new MasterDataHashes
+        {
+            monster = hash
+        }
+    };
+
+    return JsonUtility.ToJson(request);
+}
+
+public static bool TrySaveMonster(MasterDataEntry entry)
+{
+    if (entry == null ||
+        string.IsNullOrWhiteSpace(entry.data) ||
+        string.IsNullOrEmpty(entry.hash))
+    {
+        return false;
+    }
+
+    // 서버에서 받은 데이터와 Hash가 일치하는지 확인
+    string calculatedHash = ComputeHash(entry.data);
+
+    if (!string.Equals(
+        calculatedHash,
+        entry.hash,
+        StringComparison.OrdinalIgnoreCase))
+    {
+        Debug.LogError("[MasterDataStorage] Monster Hash 불일치");
+        return false;
+    }
+
+    try
+    {
+        // 서버에서 받은 JSON 문자열을 변경 없이 저장한다.
+        File.WriteAllText(
+            MonsterPath,
+            entry.data,
+            new UTF8Encoding(false)
+        );
+
+        return true;
+    }
+    catch (Exception e)
+    {
+        Debug.LogError($"[MasterDataStorage] 저장 실패: {e.Message}");
+        return false;
+    }
+}
+
+private static string ComputeHash(string data)
+{
+    byte[] bytes = Encoding.UTF8.GetBytes(data);
+
+    using SHA256 sha = SHA256.Create();
+
+    byte[] hashBytes = sha.ComputeHash(bytes);
+
+    return BitConverter.ToString(hashBytes)
+        .Replace("-", "")
+        .ToLowerInvariant();
+}
+```
+
+`Assets/Runtime/Scripts/HTTP/MasterDataStorage.cs` — 초기 구현 커밋 `ceb838dc`에서 관련 부분 발췌
+</details>
+
+
+---
+
+## 3. 전투 Object Pool
+
+전투 중 반복적으로 생성되는 적 객체를 재사용하기 위해 Prefab 기반 Object Pool을 구현했습니다.
+
+CombatObjectPool은 적 Prefab별로 사용 가능한 객체를 Stack에 보관하고, 현재 대여 중인 객체를 HashSet으로 추적합니다.
+
+`Get → 객체 초기화 및 사용 → 상태 정리 → Return`
+
+Get()은 사용 가능한 객체가 있으면 재사용하고, 없으면 새로 생성합니다.
+
+Return()은 현재 대여 중인 객체인지 확인한 뒤 비활성화하여 보관합니다. HashSet.Remove()의 결과를 이용하여 중복 반환과 다른 Pool에 속한 객체의 반환을 방지합니다.
+
+적의 전투 상태 및 사망 처리는 EnemyManager가 담당하고, CombatObjectPool은 객체의 생성·재사용·반환을 관리하도록 역할을 분리했습니다. Scene 종료 시에는 DestroyAll()을 통해 Pool에서 관리하는 객체와 Root를 정리합니다.
+
 
 <details>
 <summary><b>`Assets/Runtime/Scripts/Enemy/CombatObjectPool.cs`</b></summary>
@@ -369,18 +545,17 @@ public sealed class CombatObjectPool
 
 </details>
 
+
 ---
 
 ## 회고
-이번 프로젝트에서는 개발 초기 회의를 통해 주요 시스템의 역할과 담당 Manager를 구분하고 구현을 시작했습니다.
 
-기획 단계에서 결정된 게임의 핵심 기능을 기준으로 각 시스템의 책임과 의존 관계를 정리하고, 이를 관리할 Manager Class를 먼저 구성한 뒤 세부 기능을 구현했습니다.
+이번 프로젝트에서는 여러 개발자가 동시에 기능을 구현하는 과정에서 시스템의 역할과 인터페이스를 명확히 정의하고 공유하는 것이 중요하다는 점을 경험했습니다.
 
-덕분에 각자 개발한 기능을 통합하는 과정에서 시스템 간 연결 지점을 파악하고 필요한 기능을 추가하기가 비교적 수월했습니다.
+특히 초기 HTTP 인증 및 데이터 동기화 구조가 이후 서버 API와 데이터 테이블의 확장에 활용되는 과정을 경험했습니다.
 
-여러 개발자가 협업하는 환경에서는 개발 초기부터 시스템의 책임과 관계를 명확하게 정의하고 공유하는 것이 중요하다는 점을 경험했습니다.
-
+반면 Object Pool은 개발 초기 예상 규모에 맞춰 도입했으나, 실제 게임플레이에서 성능 개선 효과를 확정할 만큼 충분한 측정과 검증을 수행하지 못했습니다.
 
 ---
 
-코드는 설명에 필요한 부분만 발췌한 것이고, 전체 코드는 팀 저장소에 있습니다. → https://github.com/SpartaTeam2Project/Client_ImTrainer (프로젝트는 사용한 asset의 저작권 관련 문제를 우려하여 공개수준이 private으로 설정되어있습니다.)
+코드는 설명에 필요한 부분만 발췌했습니다. 전체 코드는 팀 저장소에 있으며, 사용한 Asset의 저작권 관련 문제를 고려하여 팀 저장소는 Private으로 설정되어 있습니다.
